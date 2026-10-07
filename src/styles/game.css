@@ -48,7 +48,8 @@
 .pause-overlay{z-index:5;background:transparent;align-items:end;padding-bottom:5%}.pause-modal{width:64%;max-width:300px;padding:14px 10px}.pause-modal h2{font-size:clamp(17px,2.8svh,25px);margin:0 0 10px;letter-spacing:2px}.pause-actions{display:flex;justify-content:center;flex-wrap:wrap;gap:8px}.pause-actions button{font-size:11px;padding:9px 14px}.pause-modal .hint{margin-top:10px;font-size:9px!important}
 
 /* Credits use a native modal for focus containment without changing pause state. */
-.controls #credits-command{border:0;padding:0;background:none;color:inherit;font:inherit;letter-spacing:inherit;cursor:pointer;white-space:nowrap}
+.controls button{border:0;padding:4px 0;background:none;color:inherit;font:inherit;letter-spacing:inherit;cursor:pointer;white-space:nowrap;touch-action:none;user-select:none}
+.table{touch-action:none;user-select:none}.sound-controls{touch-action:auto}.controls{flex-wrap:wrap;height:auto;min-height:20px}.controls button:focus-visible{outline:1px solid #ffd2e8;outline-offset:3px}
 #credits-command:focus-visible{outline:1px solid #ffd2e8;outline-offset:3px}
 .credits-dialog{width:min(88vw,430px);max-height:88svh;overflow:auto;padding:26px 22px;text-align:center;color:#ffe5ee;background:linear-gradient(145deg,#2c1024f7,#140b18fa);border:1px solid #c4818d;border-radius:6px;box-shadow:0 0 30px #ef629b30,0 18px 50px #0009}
 .credits-dialog::backdrop{background:#160c1838}

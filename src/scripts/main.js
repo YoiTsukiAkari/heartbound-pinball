@@ -16,10 +16,16 @@
   const pauseOverlay = $('pause-overlay'), resumeButton = $('resume-button'), restartButton = $('restart-button');
   const startCopy = ['modal-kicker', 'modal-title', 'modal-body', 'modal-hint'].map(id => [id, $(id).innerHTML]);
   let announcementUntil = 0, previous = performance.now(), accumulator = 0;
+  const heldKeys = new Set(), heldPointers = new Map();
+  function syncInput() {
+    game.input[0] = [...heldKeys].some(key => left.includes(key)) || [...heldPointers.values()].includes(0);
+    game.input[1] = [...heldKeys].some(key => right.includes(key)) || [...heldPointers.values()].includes(1);
+  }
+  function releaseInput() { heldKeys.clear(); heldPointers.clear(); game.input.fill(false); }
   function announce(text) { $('announcement').textContent = text; announcementUntil = game.time + 1.1; }
   function setPaused(paused) {
     if (game.state !== 'playing') return;
-    game.paused = paused; game.input.fill(false); pauseOverlay.hidden = !paused;
+    game.paused = paused; releaseInput(); pauseOverlay.hidden = !paused;
     sound.update(game.state, paused);
     accumulator = 0; previous = performance.now();
     if (paused) resumeButton.focus(); else document.activeElement?.blur();
@@ -84,12 +90,12 @@
   window.addEventListener('unhandledrejection', e => PinballApp.errors.push(String(e.reason)));
   const credits = $('credits-dialog');
   function closeCredits() {
-    credits.close(); game.input.fill(false); accumulator = 0; previous = performance.now();
+    credits.close(); releaseInput(); accumulator = 0; previous = performance.now();
     sound.update(game.state, game.paused || !!PinballApp.debug?.mode.paused);
   }
   function openCredits() {
     if (credits.open) return;
-    game.input.fill(false); accumulator = 0; previous = performance.now();
+    releaseInput(); accumulator = 0; previous = performance.now();
     credits.showModal(); sound.update(game.state, true);
   }
   $('credits-command').addEventListener('click', openCredits);
@@ -125,12 +131,60 @@
     if (e.target instanceof HTMLButtonElement && ['Enter', ' '].includes(e.key)) return;
     if (left.includes(e.key) || right.includes(e.key) || e.key === ' ') e.preventDefault();
     if (!e.repeat && ['ready', 'over', 'clear'].includes(game.state)) game.start();
-    if (left.includes(e.key)) { if (!game.input[0]) sound.play('flipper'); game.input[0] = true; }
-    if (right.includes(e.key)) { if (!game.input[1]) sound.play('flipper'); game.input[1] = true; }
+    if (left.includes(e.key) || right.includes(e.key)) { heldKeys.add(e.key); syncInput(); }
   });
-  window.addEventListener('keyup', e => { if (left.includes(e.key)) game.input[0] = false; if (right.includes(e.key)) game.input[1] = false; });
-  window.addEventListener('blur', () => game.input.fill(false));
-  document.addEventListener('visibilitychange', () => { if (document.hidden) game.input.fill(false); });
+  window.addEventListener('keyup', e => { heldKeys.delete(e.key); syncInput(); });
+  window.addEventListener('blur', releaseInput);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) releaseInput(); });
+  // A pointer holds one flipper until release, even if it leaves the hit area.
+  function pointerFlipper(e, side) {
+    if (e.button !== 0 || credits.open || game.paused || game.state !== 'playing') return;
+    e.preventDefault(); heldPointers.set(e.pointerId, side); syncInput();
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+  function releasePointer(e) { heldPointers.delete(e.pointerId); syncInput(); }
+  for (const id of ['table', 'left-command', 'right-command']) {
+    for (const event of ['pointerup', 'pointercancel', 'lostpointercapture']) $(id).addEventListener(event, releasePointer);
+  }
+  const table = $('table');
+  const flipperClicks = new Set();
+  function flipperAt(e) {
+    const rect = table.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width * C.width;
+    const y = (e.clientY - rect.top) / rect.height * 1344 + 48;
+    // Broad lower-board zones, with a central gap reserved for SPACE actions.
+    return y >= 1080 && y <= 1392 ? (x >= 100 && x <= 490 ? 0 : x >= 534 && x <= 924 ? 1 : null) : null;
+  }
+  const interactive = e => e.target.closest('button, input, select, textarea, a, summary, #sound-controls, .modal, #clear-scene');
+  table.addEventListener('pointerdown', e => {
+    if (interactive(e)) return;
+    const side = flipperAt(e);
+    if (side !== null && game.state === 'playing' && !game.paused && !credits.open && e.button === 0) {
+      flipperClicks.add(e.pointerId); pointerFlipper(e, side);
+    }
+  });
+  table.addEventListener('pointercancel', e => flipperClicks.delete(e.pointerId));
+  function spaceAction() {
+    if (credits.open || startButton.disabled) return;
+    sound.unlock();
+    if (game.state === 'playing') setPaused(!game.paused);
+    else if (game.state === 'clear') clearScene.reveal();
+    else if (['ready', 'over'].includes(game.state)) { releaseInput(); game.start(); }
+  }
+  table.addEventListener('click', e => {
+    // Dragging away from a flipper before releasing must not trigger PAUSE.
+    if (flipperClicks.delete(e.pointerId)) return;
+    if (interactive(e)) return;
+    if (game.state === 'playing' && !game.paused && flipperAt(e) !== null) return;
+    spaceAction();
+  });
+  document.addEventListener('click', e => {
+    if (e.target === document.body || e.target === document.querySelector('.shell') || e.target.closest('.masthead')) spaceAction();
+  });
+  ['left-command', 'right-command'].forEach((id, side) => {
+    $(id).addEventListener('pointerdown', e => pointerFlipper(e, side));
+  });
+  $('pause-command').addEventListener('click', spaceAction);
   startButton.addEventListener('click', () => { sound.unlock(); game.start(); startButton.blur(); });
   resumeButton.addEventListener('click', () => setPaused(false));
   restartButton.addEventListener('click', () => {

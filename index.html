@@ -6,14 +6,14 @@
   <meta name="theme-color" content="#210c17">
   <title>HEARTBOUND ❤ PINBALL</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="src/styles/game.css?v=board-controls-1">
+  <link rel="stylesheet" href="src/styles/game.css?v=pointer-controls-1">
   <script defer src="src/scripts/config.js?v=clear-voice-44"></script>
   <script defer src="src/scripts/physics.js?v=compound-circles-1"></script>
   <script defer src="src/scripts/game.js?v=freeze-cinematic-1"></script>
   <script defer src="src/scripts/renderer.js?v=hit-reaction-selection-2"></script>
   <script defer src="src/scripts/clear-scene.js?v=final-celebration-2"></script>
   <script defer src="src/scripts/sound.js?v=clear-voice-44"></script>
-  <script defer src="src/scripts/main.js?v=freeze-cinematic-1"></script>
+  <script defer src="src/scripts/main.js?v=pointer-controls-1"></script>
 </head>
 <body>
   <main class="shell">
@@ -42,7 +42,7 @@
     </div>
   </details>
     </section>
-    <footer class="controls"><span><kbd>←</kbd> / <kbd>A</kbd> LEFT</span><span class="control-heart">♥</span><span>RIGHT <kbd>→</kbd> / <kbd>D</kbd></span><span class="control-heart" aria-hidden="true">♥</span><span><kbd>SPACE</kbd> / <kbd>ESC</kbd> / <kbd>P</kbd> PAUSE</span><span class="control-heart" aria-hidden="true">♥</span><button id="credits-command" type="button"><kbd>C</kbd> CREDITS</button></footer>
+    <footer class="controls"><button id="left-command" type="button" aria-label="左フリッパー"><kbd>←</kbd> / <kbd>A</kbd> LEFT</button><span class="control-heart">♥</span><button id="right-command" type="button" aria-label="右フリッパー">RIGHT <kbd>→</kbd> / <kbd>D</kbd></button><span class="control-heart" aria-hidden="true">♥</span><button id="pause-command" type="button"><kbd>SPACE</kbd> / <kbd>ESC</kbd> / <kbd>P</kbd> PAUSE</button><span class="control-heart" aria-hidden="true">♥</span><button id="credits-command" type="button"><kbd>C</kbd> CREDITS</button></footer>
   </main>
   <dialog id="credits-dialog" class="credits-dialog" aria-labelledby="credits-title">
     <h2 id="credits-title">CREDITS</h2>
@@ -62,6 +62,5 @@
     <p class="hint">C / ESC で閉じる</p>
   </dialog>
 
-  <!-- Cloudflare Web Analytics --><script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "2c407e0033894a498529aebae28b07c7"}'></script><!-- End Cloudflare Web Analytics -->
 </body>
 </html>
