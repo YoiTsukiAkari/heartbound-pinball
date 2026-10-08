@@ -1,6 +1,9 @@
 (async function (P) {
   'use strict';
   const C = P.CONFIG, $ = id => document.getElementById(id);
+  // The release packager disables this only in its temporary copy.
+  const developerModeEnabled = false;
+  const developerMode = developerModeEnabled && new URLSearchParams(location.search).get('debug') === '1';
   const sound = new P.Sound();
   // Unlock only after a user gesture; browsers intentionally block autoplay.
   window.addEventListener('pointerdown', () => sound.unlock(), { capture: true });
@@ -15,7 +18,7 @@
   const clearScene = new P.ClearScene($('table'), () => { game.start(); clearScene.button.blur(); });
   const pauseOverlay = $('pause-overlay'), resumeButton = $('resume-button'), restartButton = $('restart-button');
   const startCopy = ['modal-kicker', 'modal-title', 'modal-body', 'modal-hint'].map(id => [id, $(id).innerHTML]);
-  let announcementUntil = 0, previous = performance.now(), accumulator = 0;
+  let announcementUntil = 0, previous = performance.now(), accumulator = 0, bonus;
   const heldKeys = new Set(), heldPointers = new Map();
   function syncInput() {
     game.input[0] = [...heldKeys].some(key => left.includes(key)) || [...heldPointers.values()].includes(0);
@@ -31,7 +34,7 @@
     if (paused) resumeButton.focus(); else document.activeElement?.blur();
   }
   function syncHud() {
-    $('hit').textContent = game.hits; $('target').textContent = C.stages[game.stage].hits;
+    $('hit').textContent = game.hits; $('target').textContent = game.goal();
     $('stage').textContent = game.stage + 1;
     const ballIcons = $('ball-icons'), remaining = Math.max(0, game.balls);
     ballIcons.setAttribute('aria-label', '残りボール ' + remaining + '個');
@@ -40,8 +43,9 @@
       image.src = C.assets.ball; image.alt = ''; image.draggable = false;
       return image;
     }));
-    const filled = Math.floor(6 * game.hits / C.stages[game.stage].hits);
+    const filled = Math.min(6, Math.floor(6 * game.hits / game.goal()));
     $('progress').textContent = Array.from({ length: 6 }, (_, i) => i < filled ? '♥' : '♡').join(' ');
+    bonus?.refresh();
   }
   const game = new P.Game((event, stage, contact) => {
     if (event === 'wall' || event === 'flipper-contact') {
@@ -50,12 +54,13 @@
       return;
     }
     if (event === 'start' || event === 'ready') renderer.contactEffects.length = 0;
+    sound.setHard(game.modes.hard);
     sound.update(game.state, game.paused);
     if (event === 'start') sound.play('start');
     if (event === 'lost') sound.play('lost');
     if (event === 'over' || event === 'clear') sound.play(event);
     if (event === 'hit') {
-      const goal = C.stages[stage].hits;
+      const goal = game.goal(stage);
       const tier = Math.min(3, Math.floor((game.hits - 1) / Math.max(1, goal - 1) * 4));
       sound.play(game.effects.at(-1)?.kind === 'stage-clear' ? 'stage' : 'hit', tier);
     }
@@ -67,7 +72,8 @@
     if (event === 'hit') sound.playVoice(stage);
     if (['start', 'ready', 'over'].includes(event)) sound.stopVoice();
     if (event === 'clear') {
-      sound.playClearVoice();
+      releaseInput(); if (game.completedRun) bonus?.unlock();
+      sound.playClearVoice(false, (game.clearPreview ?? (game.modes.hard ? 'hard' : 'normal')) === 'hard');
       renderer.clearTransition = { started: game.time - (matchMedia('(prefers-reduced-motion: reduce)').matches ? 1.05 : 0), duration: 1.05, switchAt: 0.36 };
       $('announcement').textContent = ''; announcementUntil = 0;
       overlay.hidden = true; clearScene.show();
@@ -101,10 +107,28 @@
   $('credits-command').addEventListener('click', openCredits);
   $('credits-close').addEventListener('click', closeCredits);
   credits.addEventListener('cancel', e => { e.preventDefault(); closeCredits(); });
+  bonus = P.setupBonus(PinballApp, {
+    releaseInput, syncHud,
+    resetClock() { accumulator = 0; previous = performance.now(); sound.update(game.state, credits.open || game.paused || bonus?.isOpen || !!PinballApp.debug?.mode.paused); }
+  });
+  PinballApp.bonus = bonus;
+  let tuningLoad;
+  PinballApp.ensureTuning = function () {
+    if (PinballApp.debug) return Promise.resolve(PinballApp.debug);
+    return tuningLoad ??= (async () => {
+      const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = 'src/styles/debug.css?v=maintenance-sidebar-1'; document.head.append(css);
+      if (!P.setupDebug) {
+        const script = document.createElement('script'); script.src = 'src/scripts/debug.js?v=voices-mao-1';
+        await new Promise((resolve, reject) => { script.onload = resolve; script.onerror = reject; document.head.append(script); });
+      }
+      return P.setupDebug(PinballApp, { syncHud, overlay, hideClearScene: () => clearScene.hide() }, !developerMode);
+    })().catch(error => { tuningLoad = null; throw error; });
+  };
   const left = ['ArrowLeft', 'a', 'A'], right = ['ArrowRight', 'd', 'D'];
   window.addEventListener('keydown', e => {
     if (e.target instanceof HTMLElement && e.target.closest('input, select, textarea, #debug-panel, #sound-controls')) return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (bonus.isOpen) { bonus.key(e); return; }
     if (['c', 'C'].includes(e.key)) {
       e.preventDefault(); if (!e.repeat) { if (credits.open) closeCredits(); else openCredits(); } return;
     }
@@ -112,6 +136,7 @@
       if (e.key === 'Escape') { e.preventDefault(); if (!e.repeat) closeCredits(); }
       return;
     }
+    if (bonus.key(e)) return;
     if (game.paused && e.key === 'Tab') {
       e.preventDefault(); (document.activeElement === resumeButton ? restartButton : resumeButton).focus(); return;
     }
@@ -138,7 +163,7 @@
   document.addEventListener('visibilitychange', () => { if (document.hidden) releaseInput(); });
   // A pointer holds one flipper until release, even if it leaves the hit area.
   function pointerFlipper(e, side) {
-    if (e.button !== 0 || credits.open || game.paused || game.state !== 'playing') return;
+    if (e.button !== 0 || credits.open || bonus.isOpen || game.paused || game.state !== 'playing') return;
     e.preventDefault(); heldPointers.set(e.pointerId, side); syncInput();
     e.currentTarget.setPointerCapture(e.pointerId);
   }
@@ -165,7 +190,7 @@
   });
   table.addEventListener('pointercancel', e => flipperClicks.delete(e.pointerId));
   function spaceAction() {
-    if (credits.open || startButton.disabled) return;
+    if (credits.open || bonus.isOpen || startButton.disabled) return;
     sound.unlock();
     if (game.state === 'playing') setPaused(!game.paused);
     else if (game.state === 'clear') clearScene.reveal();
@@ -194,21 +219,18 @@
   });
   try { await renderer.load(); game.ready(); }
   catch (error) { $('modal-title').textContent = '読み込みに失敗しました'; $('modal-body').textContent = error.message; $('modal-hint').textContent = 'ページを再読み込みしてください'; return; }
-  // The tuning module and stylesheet are only fetched for explicit local debug mode.
-  if (new URLSearchParams(location.search).get('debug') === '1') {
-    const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = 'src/styles/debug.css'; document.head.append(css);
-    const script = document.createElement('script'); script.src = 'src/scripts/debug.js?v=freeze-cinematic-1';
-    await new Promise((resolve, reject) => { script.onload = resolve; script.onerror = reject; document.head.append(script); });
-    P.setupDebug(PinballApp, { syncHud, overlay, hideClearScene: () => clearScene.hide() });
+  // Load tuning only for developer mode or an unlocked M-mode request.
+  if (developerMode) {
+    await PinballApp.ensureTuning();
   }
   function frame(now) {
-    sound.update(game.state, credits.open || game.paused || !!PinballApp.debug?.mode.paused);
-    if (!document.hidden && !game.paused && !credits.open) {
+    sound.update(game.state, credits.open || bonus.isOpen || game.paused || !!PinballApp.debug?.mode.paused);
+    if (!document.hidden && !game.paused && !credits.open && !bonus.isOpen) {
       accumulator += Math.min((now - previous) / 1000, 0.05);
       while (accumulator >= C.step) { game.tick(C.step); accumulator -= C.step; }
       renderer.draw(game);
       if (announcementUntil && game.time >= announcementUntil) { $('announcement').textContent = ''; announcementUntil = 0; }
-    } else accumulator = 0;
+    } else { accumulator = 0; if (bonus.isOpen || PinballApp.mMode?.isOpen) renderer.draw(game); }
     previous = now; requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);

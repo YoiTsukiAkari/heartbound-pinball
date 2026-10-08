@@ -2,7 +2,149 @@
   'use strict';
   const C = P.CONFIG;
   class Renderer {
-    constructor(canvas) { this.canvas = canvas; this.ctx = canvas.getContext('2d'); this.images = {}; this.characterLayers = new Map(); this.contactEffects = []; this.ballParticles = new WeakMap(); }
+    constructor(canvas) { this.canvas = canvas; this.ctx = canvas.getContext('2d'); this.images = {}; this.characterLayers = new Map(); this.glitchLayers = new Map(); this.contactEffects = []; this.ballParticles = new WeakMap(); }
+    hardHitAge(game, hit) {
+      if (!game.modes.hard || game.state === 'clear') return Infinity;
+      const preview = this.hardHitPreview?.stage === game.stage ? game.time - this.hardHitPreview.at : Infinity;
+      return Math.min(hit?.age ?? game.time - game.lastHit, preview);
+    }
+    hardShadowMotion(game, hit) {
+      this.hardShadowMotions ??= new WeakMap();
+      const preview = this.hardHitPreview?.stage === game.stage ? this.hardHitPreview : null;
+      const usePreview = preview && game.time - preview.at < (hit?.age ?? game.time - game.lastHit);
+      if (this.hardShadowFallback?.at !== game.lastHit || this.hardShadowFallback?.stage !== game.stage) {
+        this.hardShadowFallback = { at: game.lastHit, stage: game.stage };
+      }
+      const token = usePreview ? preview : (hit ?? this.hardShadowFallback);
+      let motion = this.hardShadowMotions.get(token);
+      if (!motion) {
+        // Keep visual randomness separate from gameplay and fixed during each HIT.
+        this.hardShadowSeed ??= globalThis.crypto?.getRandomValues(new Uint32Array(1))[0] || 0x91e10da5;
+        const random = () => {
+          let seed = this.hardShadowSeed; seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5;
+          this.hardShadowSeed = seed >>> 0; return this.hardShadowSeed / 4294967296;
+        };
+        motion = { angle: random() * Math.PI * 2, amplitude: 0.65 + random() * 0.35,
+          cycles: 0.7 + random() * 0.7, bend: (random() < 0.5 ? -1 : 1) * (0.3 + random() * 0.4) };
+        this.hardShadowMotions.set(token, motion);
+      }
+      if (hit && !usePreview) this.hardShadowMotions.set(this.hardShadowFallback, motion);
+      return motion;
+    }
+    hardHitLayer(game, rect) {
+      this.hardHitLayers ??= new Map();
+      const image = this.images['stage' + (game.stage + 1)], width = rect[2], height = rect[3];
+      let layer = this.hardHitLayers.get(image);
+      if (layer?.width === width && layer?.height === height) return layer;
+      const make = (color, gray = false) => {
+        const canvas = document.createElement('canvas'); canvas.width = Math.ceil(width); canvas.height = Math.ceil(height);
+        const ctx = canvas.getContext('2d'); if (gray) ctx.filter = 'grayscale(1)';
+        ctx.drawImage(image, 0, 0, width, height); ctx.filter = 'none';
+        if (color) { ctx.globalCompositeOperation = 'source-in'; ctx.fillStyle = color; ctx.fillRect(0, 0, canvas.width, canvas.height); }
+        return canvas;
+      };
+      layer = { width, height, shadow: make('#160921'), afterimage: make('#d9a0ee'), gray: make(null, true) };
+      this.hardHitLayers.set(image, layer); return layer;
+    }
+    drawHardHit(game, rect, hit, front = false) {
+      const s = C.hardEffects.hit, age = this.hardHitAge(game, hit);
+      if (age < 0 || age >= s.duration || !Object.values(s).some(value => value?.enabled)) return;
+      const ctx = this.ctx, layer = this.hardHitLayer(game, rect), width = rect[2], height = rect[3], t = age / s.duration;
+      ctx.save();
+      if (!front) {
+        if (s.afterimage.enabled) {
+          // Slowly expanding alpha silhouettes sit behind the original face.
+          for (let i = 0; i < 3; i++) {
+            const p = Math.max(0, t - i * 0.1), expansion = 1 + Math.sin(p * Math.PI / 2) * s.afterimage.spread;
+            ctx.save(); ctx.globalAlpha *= s.afterimage.opacity / 3 * Math.sin(Math.PI * t) * (1 - t);
+            ctx.scale(expansion, expansion); ctx.drawImage(layer.afterimage, -width / 2, -height / 2, width, height); ctx.restore();
+          }
+        }
+        if (s.shadow.enabled && age > s.shadow.delay) {
+          const p = Math.min(1, (age - s.shadow.delay) / Math.max(0.01, s.duration - s.shadow.delay));
+          const motion = this.hardShadowMotion(game, hit), envelope = Math.sin(Math.PI * p);
+          const along = Math.sin(p * Math.PI * 2 * motion.cycles) * envelope;
+          const across = Math.sin(p * Math.PI) * envelope * motion.bend;
+          const distance = s.shadow.offset * motion.amplitude;
+          ctx.save(); ctx.globalAlpha *= s.shadow.opacity * Math.sin(Math.PI * p);
+          ctx.translate((Math.cos(motion.angle) * along - Math.sin(motion.angle) * across) * distance,
+            (Math.sin(motion.angle) * along + Math.cos(motion.angle) * across) * distance);
+          ctx.drawImage(layer.shadow, -width / 2, -height / 2, width, height); ctx.restore();
+        }
+      } else {
+        if (s.desaturate.enabled && age < s.desaturate.duration) {
+          ctx.save(); ctx.globalAlpha *= s.desaturate.strength * Math.sin(Math.PI * age / s.desaturate.duration);
+          ctx.drawImage(layer.gray, -width / 2, -height / 2, width, height); ctx.restore();
+        }
+        if (s.heartWave.enabled) {
+          for (let i = 0; i < 2; i++) {
+            const p = (t - i * 0.18) / (1 - i * 0.18); if (p < 0 || p > 1) continue;
+            const size = s.heartWave.size * (0.2 + Math.sin(p * Math.PI / 2) * 0.8);
+            ctx.save(); ctx.translate(0, height * 0.15); ctx.globalAlpha *= s.heartWave.opacity * Math.sin(Math.PI * p) * (1 - p);
+            ctx.strokeStyle = '#21102d'; ctx.shadowColor = '#ed81cc'; ctx.shadowBlur = 9; ctx.lineWidth = 4 * (1 - p) + 1;
+            ctx.beginPath(); ctx.moveTo(0, size * 0.65);
+            ctx.bezierCurveTo(-size * 1.2, -size * 0.1, -size * 0.7, -size, 0, -size * 0.35);
+            ctx.bezierCurveTo(size * 0.7, -size, size * 1.2, -size * 0.1, 0, size * 0.65); ctx.stroke(); ctx.restore();
+          }
+        }
+      }
+      ctx.restore();
+    }
+    drawHardGlitch(game, rect, hit) {
+      const s = C.hardEffects.glitch;
+      const preview = this.glitchPreview?.stage === game.stage ? game.time - this.glitchPreview.at : Infinity;
+      const age = Math.min(hit?.age ?? (game.time - game.lastHit), preview);
+      if (!game.modes.hard || !s.enabled || age < 0 || age >= s.duration || s.opacity <= 0 || s.offset <= 0) return;
+      const image = this.images['stage' + (game.stage + 1)], width = rect[2], height = rect[3];
+      let layers = this.glitchLayers.get(image);
+      if (!layers || layers.width !== width || layers.height !== height) {
+        layers = { width, height, canvases: [0, 1, 2].map(channel => {
+          const canvas = document.createElement('canvas'); canvas.width = Math.ceil(width); canvas.height = Math.ceil(height);
+          const ctx = canvas.getContext('2d'); ctx.drawImage(image, 0, 0, width, height);
+          const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          // Preserve source shading and alpha in cyan, magenta and yellow copies.
+          for (let i = 0; i < pixels.data.length; i += 4) {
+            const brightness = Math.round(pixels.data[i] * 0.3 + pixels.data[i + 1] * 0.59 + pixels.data[i + 2] * 0.11);
+            for (let c = 0; c < 3; c++) pixels.data[i + c] = c === channel ? 0 : brightness;
+          }
+          ctx.putImageData(pixels, 0, 0);
+          return canvas;
+        }) };
+        this.glitchLayers.set(image, layers);
+      }
+      // Private visual RNG: HIT directions vary without consuming gameplay RNG.
+      this.glitchDirections ??= new WeakMap();
+      const hitAge = hit?.age ?? (game.time - game.lastHit);
+      if (!hit && this.glitchFallback?.at !== game.lastHit) this.glitchFallback = { at: game.lastHit };
+      const token = preview < hitAge ? this.glitchPreview : (hit ?? this.glitchFallback);
+      let directions = this.glitchDirections.get(token);
+      if (!directions) {
+        this.glitchRandomState ??= globalThis.crypto?.getRandomValues(new Uint32Array(1))[0] || 0x6d2b79f5;
+        const random = () => {
+          let seed = this.glitchRandomState; seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5;
+          this.glitchRandomState = seed >>> 0; return this.glitchRandomState / 4294967296;
+        };
+        directions = [0, 1, 2].map(() => {
+          const angle = (25 + random() * 40) * Math.PI / 180;
+          return { angle, sx: random() < 0.5 ? -1 : 1, sy: random() < 0.5 ? -1 : 1 };
+        });
+        this.glitchDirections.set(token, directions);
+      }
+      const ctx = this.ctx, frame = Math.floor(age * s.speed), fade = (1 - age / s.duration) ** 1.2;
+      ctx.save(); ctx.globalAlpha *= s.opacity * fade;
+      for (let color = 0; color < layers.canvases.length; color++) {
+        const image = layers.canvases[color], bandHeight = image.height / s.bands;
+        for (let band = 0; band < s.bands; band++) {
+          const wave = Math.sin(frame * 2.1 + band * 1.7 + color * 2.4);
+          const direction = directions[color], distance = s.offset * (0.55 + Math.abs(wave) * 0.45) * fade;
+          const dx = Math.cos(direction.angle) * direction.sx * distance;
+          const dy = Math.sin(direction.angle) * direction.sy * distance;
+          ctx.drawImage(image, 0, band * bandHeight, image.width, bandHeight,
+            -width / 2 + dx, -height / 2 + band * height / s.bands + dy, width, height / s.bands);
+        }
+      }
+      ctx.restore();
+    }
     addContactEffect(game, kind, speed, contact) {
       // Decorations observe the resolved collision; they never alter the ball.
       if (this.contactEffects.some(e => e.kind === kind && game.time - e.started < 0.06 && Math.hypot(e.x - contact.x, e.y - contact.y) < 45)) return;
@@ -443,8 +585,10 @@
         ctx.rotate(stage.rotation ?? 0); ctx.scale(scale, scale);
         ctx.drawImage(images['stage' + (game.stage + 1)], -width / 2, -height / 2, width, height); ctx.restore();
       }
-      const rect = game.state === 'clear' ? C.clearArt.rect : stage.rect;
-      const scale = game.state === 'clear' ? C.clearArt.scale : (stage.scale ?? 1);
+      const hardClear = (game.clearPreview ?? (game.modes.hard ? 'hard' : 'normal')) === 'hard';
+      const clearArt = hardClear ? C.hardClearArt : C.clearArt;
+      const rect = game.state === 'clear' ? clearArt.rect : stage.rect;
+      const scale = game.state === 'clear' ? clearArt.scale : (stage.scale ?? 1);
       const reaction = Math.max(0, 1 - (game.time - game.lastHit) / 0.28);
       ctx.save(); ctx.translate(rect[0] + rect[2] * scale / 2, rect[1] + rect[3] * scale / 2);
       if (game.stageShift) {
@@ -456,7 +600,7 @@
       }
       ctx.rotate((game.state === 'clear' ? 0 : (stage.rotation ?? 0)) + Math.sin(reaction * 18) * reaction * 0.018); ctx.scale(scale * (1 - reaction * 0.018), scale * (1 - reaction * 0.018));
       if (game.state === 'clear') {
-        if (showClearArt) ctx.drawImage(images.clear, -rect[2] / 2, -rect[3] / 2, rect[2], rect[3]);
+        if (showClearArt) ctx.drawImage(hardClear ? images.hardClear : images.clear, -rect[2] / 2, -rect[3] / 2, rect[2], rect[3]);
       } else {
         const layer = this.characterLayer(images['stage' + (game.stage + 1)], rect[2], rect[3]);
         ctx.save();
@@ -469,8 +613,12 @@
         ctx.globalAlpha *= glow.strength * (1 - glow.pulseDepth + glow.pulseDepth * (Math.sin(game.time * glow.speed) + 1) / 2);
         ctx.drawImage(layer.glow, -rect[2] / 2 - layer.padding, -rect[3] / 2 - layer.padding);
         ctx.restore();
-        ctx.drawImage(layer.canvas, -rect[2] / 2 - layer.padding, -rect[3] / 2 - layer.padding);
         const hit = [...game.effects].reverse().find(e => e.stage === game.stage);
+        this.drawHardHit(game, rect, hit);
+        this.drawHardGlitch(game, rect, hit);
+        // The original face stays crisp over the displaced CMY copies.
+        ctx.drawImage(layer.canvas, -rect[2] / 2 - layer.padding, -rect[3] / 2 - layer.padding);
+        this.drawHardHit(game, rect, hit, true);
         if (hit) {
           ctx.save();
           ctx.globalAlpha *= Math.max(0, 1 - hit.age / 0.38) * (hit.kind === 'stage-clear' ? hit.celebration.burst.glow : C.hitEffects.tiers[hit.tier].glow);

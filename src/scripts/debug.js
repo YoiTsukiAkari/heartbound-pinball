@@ -1,12 +1,14 @@
 (function (P) {
   'use strict';
-  P.setupDebug = function (app, ui) {
+  P.setupDebug = function (app, ui, player = false) {
+    if (app.debug) return app.debug;
     const C = P.CONFIG, g = app.game, renderer = app.renderer;
     const defaults = JSON.parse(JSON.stringify(C)); // Reset snapshot, never a second live config.
-    const mode = { paused: false, slow: false, freeze: false, immortal: false, walls: true, character: true, flippers: true, ball: true, pivots: true, trail: false };
+    const mode = { paused: false, slow: false, freeze: false, immortal: false, walls: !player, character: !player, flippers: !player, ball: !player, pivots: !player, trail: false };
     const panel = document.createElement('aside'); panel.id = 'debug-panel'; panel.setAttribute('aria-label', 'Pinball tuning');
     panel.innerHTML = '<h2>PINBALL TUNING</h2><p>変更はこのページ内だけ。保存にはExportを使用。座標は1024×1536、角度はrad。入力中はゲームキーを無効化。</p>';
-    document.body.classList.add('debug-mode'); document.body.append(panel);
+    if (!player) document.body.classList.add('debug-mode');
+    panel.hidden = player; document.body.append(panel);
     const status = document.createElement('output'); status.id = 'debug-status'; panel.append(status);
     function section(title, open = false) { const el = document.createElement('details'); el.open = open; const summary = document.createElement('summary'); summary.textContent = title; el.append(summary); panel.append(el); return el; }
     function action(parent, id, title, run) { const b = document.createElement('button'); b.type = 'button'; b.id = id; b.textContent = title; b.addEventListener('click', run); parent.append(b); return b; }
@@ -29,6 +31,51 @@
     let circleIndex = 0;
     function selectStage(index) { playState(); g.stage = index; circleIndex = 0; g.hits = 0; g.lastHit = -100; g.effects = []; g.spawn(); ui.syncHud(); refresh(); }
     const operations = section('ステージ / テスト操作', true);
+    const hardSection = section('ハードモード演出 / HIT演出');
+    const hardHint = document.createElement('p'); hardHint.textContent = '調整はExport / Copy / Reset対象。ハードモードをONにすると必要HIT数は3倍になります。グリッチ試写はHIT数・ボール・解放状態を変更しません。'; hardSection.append(hardHint);
+    function checkSetting(id, title, get, set) {
+      const label = document.createElement('label'); label.textContent = title;
+      const input = document.createElement('input'); input.type = 'checkbox'; input.id = id;
+      refreshers.push(() => { input.checked = get(); }); input.checked = get();
+      input.addEventListener('change', () => { set(input.checked); applyConfig(); }); label.append(input); hardSection.append(label);
+    }
+    checkSetting('debug-hard-mode', 'ハードモードで確認', () => g.modes.hard, value => {
+      g.modes.hard = value; g.modes.infinite = g.modes.freeze = false; g.stopProgression();
+    });
+    const hardFields = [
+      ['tintOpacity','フィルター 濃さ',0,0.5,0.01], ['tintHue','フィルター 色相（紫270 / ピンク330）',240,350,1],
+      ['heartCount','縁ハート 個数',0,40,1], ['heartSize','縁ハート 大きさpx',4,40,1], ['heartOpacity','縁ハート 濃さ',0,1,0.05],
+      ['heartPeriod','縁ハート 周期（秒）',0.5,10,0.1], ['heartEdge','縁ハート 端からの距離（% / マイナス可）',-8,8,0.1],
+      ['heartScatterX','縁ハート 横のばらつき（%）',0,4,0.1], ['heartScatterY','縁ハート 縦のばらつき（%）',0,8,0.1],
+      ['heartTilt','縁ハート 傾きのばらつき（度）',0,60,1],
+      ['musicCutoff','BGM 高音カット（Hz / 低いほどこもる）',200,20000,100],
+      ['voiceNear','ボイス 耳元感（0で元の声）',0,1,0.05], ['voicePan','ボイス 左右（負で左 / 正で右）',-0.7,0.7,0.01],
+      ['echoMix','ボイスのみ エコー 強さ',0,0.7,0.01], ['echoDelay','ボイスのみ エコー 間隔（秒）',0.05,0.8,0.01], ['echoFeedback','ボイスのみ エコー 残り方',0,0.6,0.01]
+    ];
+    for (const [key, title, min, max, step] of hardFields) number(hardSection, 'hard-' + key, title, () => C.hardEffects[key], value => { C.hardEffects[key] = value; }, min, max, step);
+    for (const [key, title] of [['heartWave','黒いハートの波紋'],['shadow','遅れて揺れる影'],['desaturate','一瞬の色抜け'],['afterimage','じわっと広がる残像']]) {
+      checkSetting('hard-hit-' + key, title, () => C.hardEffects.hit[key].enabled, value => { C.hardEffects.hit[key].enabled = value; });
+    }
+    number(hardSection, 'hard-hit-duration', 'HIT演出 寿命（秒）', () => C.hardEffects.hit.duration, value => { C.hardEffects.hit.duration = value; }, 0.4, 2, 0.01);
+    for (const [group, key, title, min, max, step] of [
+      ['heartWave','opacity','黒ハート 波紋の濃さ',0,1,0.05], ['heartWave','size','黒ハート 波紋の広がり',30,400,1],
+      ['shadow','opacity','遅れる影 濃さ',0,1,0.05], ['shadow','offset','遅れる影 ずれ幅',0,80,1], ['shadow','delay','遅れる影 開始の遅れ（秒）',0,0.4,0.01],
+      ['desaturate','strength','色抜け 強さ',0,1,0.05], ['desaturate','duration','色抜け 戻るまで（秒）',0.05,1.5,0.01],
+      ['afterimage','opacity','広がる残像 濃さ',0,0.8,0.01], ['afterimage','spread','広がる残像 拡大幅',0,0.5,0.01]
+    ]) number(hardSection, 'hard-hit-' + group + '-' + key, title, () => C.hardEffects.hit[group][key], value => { C.hardEffects.hit[group][key] = value; }, min, max, step);
+    action(hardSection, 'debug-preview-hard-hit', 'ハードHIT演出を試す', () => {
+      if (!g.modes.hard || g.state === 'clear') { hardHint.textContent = 'ハードモードをONにして、STAGE 1～6の盤面で試してください。'; return; }
+      renderer.hardHitPreview = { stage: g.stage, at: g.time };
+    });
+    checkSetting('hard-glitch-enabled', 'HITグリッチを有効にする', () => C.hardEffects.glitch.enabled, value => { C.hardEffects.glitch.enabled = value; });
+    for (const [key, title, min, max, step] of [
+      ['duration','グリッチ 寿命（秒）',0.05,1.5,0.01], ['opacity','グリッチ 濃さ',0,0.8,0.01],
+      ['offset','グリッチ ずれ幅px',0,80,1], ['bands','グリッチ 横帯の数',1,20,1], ['speed','グリッチ 変化回数/秒',1,60,1]
+    ]) number(hardSection, 'hard-glitch-' + key, title, () => C.hardEffects.glitch[key], value => { C.hardEffects.glitch[key] = value; }, min, max, step);
+    action(hardSection, 'debug-preview-hard-glitch', 'HITグリッチを試す', () => {
+      if (!g.modes.hard || g.state === 'clear') { hardHint.textContent = 'ハードモードをONにして、STAGE 1～6の盤面で試してください。'; return; }
+      renderer.glitchPreview = { stage: g.stage, at: g.time };
+    });
     const label = document.createElement('label'); label.textContent = 'STAGE';
     const select = document.createElement('select'); select.id = 'debug-stage';
     C.stages.forEach((_, i) => { const o = document.createElement('option'); o.value = i; o.textContent = 'STAGE ' + (i + 1); select.append(o); });
@@ -58,12 +105,12 @@
     refreshers.push(() => { musicStatus.textContent = (app.sound.musicPreview ? 'BGMのみ試聴中：' : '選択中：') + app.sound.piece.name + '（' + (app.sound.musicLoopSeconds ? app.sound.musicLoopSeconds.toFixed(1) + '秒' : '読込前') + '）' + (app.sound.musicError ? ' / ' + app.sound.musicError : ''); });
     const hitVoice = section('HIT音声');
     const voiceHint = document.createElement('p');
-    voiceHint.textContent = '声だけの音量。初期設定20%。100%が導入時の最大音量、0%で無音。SE音量にも連動します。変更は即時反映、Export / Copy / Reset対象。';
+    voiceHint.textContent = '声だけの音量。初期設定45%。100%が導入時の最大音量、0%で無音。SE音量にも連動します。変更は即時反映、Export / Copy / Reset対象。';
     hitVoice.append(voiceHint);
-    number(hitVoice, 'debug-voice-volume', 'HIT音声 音量（%）', () => Math.round((C.sound.voiceVolume ?? 1) * 100), v => { C.sound.voiceVolume = v / 100; }, 0, 100, 1);
+    number(hitVoice, 'debug-voice-volume', 'HIT音声 音量（%）', () => Math.round((C.sound.voiceVolume ?? 0.45) * 100), v => { C.sound.voiceVolume = v / 100; }, 0, 100, 1);
     const voiceChoices = [...new Set(C.voices.flat())];
     voiceChoices.forEach((file, i) => {
-      const label = document.createElement('label'); label.textContent = '再生：' + file.split('/').at(-1);
+      const label = document.createElement('label'); label.textContent = '再生：' + ({ 'mao_hit_a.wav': 'あっ', 'mao_hit_n.wav': 'んっ', 'mao_hit_short.wav': 'っ', 'mao_hit_surprise.wav': 'っ！', 'mao_hit_fu.wav': 'ふっ' }[file.split('/').at(-1)] || file.split('/').at(-1));
       const input = document.createElement('input'); input.type = 'checkbox'; input.id = 'debug-voice-enabled-' + i;
       const sync = () => { input.checked = C.sound.voiceEnabled[file] !== false; }; sync(); refreshers.push(sync);
       input.addEventListener('change', () => { C.sound.voiceEnabled[file] = input.checked;
@@ -80,10 +127,15 @@
     refreshers.push(refreshVoiceStatus);
     const clearVoiceSection = section('GAME CLEAR音声');
     const clearVoiceHint = document.createElement('p');
-    clearVoiceHint.textContent = 'yattajan_01.wavを最終クリア時に再生。HIT音声とは独立した音量で、初期設定44%。0%で無音。SE音量にも連動し、Export / Copy / Reset対象。試聴はゲーム状態を変更しません。';
+    clearVoiceHint.textContent = 'まお「やったじゃん！」を通常クリア時に再生。HIT音声とは独立した音量で、初期設定62%。0%で無音。SE音量にも連動し、Export / Copy / Reset対象。試聴はゲーム状態を変更しません。';
     clearVoiceSection.append(clearVoiceHint);
-    number(clearVoiceSection, 'debug-clear-voice-volume', 'クリア音声 音量（%）', () => Math.round((C.sound.clearVoiceVolume ?? 0.44) * 100), v => { C.sound.clearVoiceVolume = v / 100; }, 0, 100, 1);
+    number(clearVoiceSection, 'debug-clear-voice-volume', 'クリア音声 音量（%）', () => Math.round((C.sound.clearVoiceVolume ?? 0.62) * 100), v => { C.sound.clearVoiceVolume = v / 100; }, 0, 100, 1);
     action(clearVoiceSection, 'debug-clear-voice-preview', 'クリア音声を試聴', () => app.sound.playClearVoice(true));
+    const hardVoiceSection = section('HARD CLEAR音声');
+    const hardVoiceHint = document.createElement('p');
+    hardVoiceHint.textContent = 'まお「おめでとっ」をハードクリア時に再生。音声間の大きさは再生ゲインで補正。初期設定52%、0%で無音。Export / Copy / Reset対象。'; hardVoiceSection.append(hardVoiceHint);
+    number(hardVoiceSection, 'debug-hard-clear-voice-volume', 'ハードクリア音声 音量（%）', () => Math.round((C.sound.hardClearVoiceVolume ?? 0.52) * 100), v => { C.sound.hardClearVoiceVolume = v / 100; }, 0, 100, 1);
+    action(hardVoiceSection, 'debug-hard-clear-voice-preview', 'ハードクリア音声を試聴', () => app.sound.playClearVoice(true, true));
     const character = section('現在STAGEのキャラクター', true);
     const stage = () => C.stages[g.stage];
     number(character, 'character-x', '画像 左上X', () => stage().rect[0], v => { stage().rect[0] = v; });
@@ -130,7 +182,18 @@
     number(clearArt, 'clear-art-y', 'クリア画像 左上Y', () => C.clearArt.rect[1], v => { C.clearArt.rect[1] = v; });
     number(clearArt, 'clear-art-scale', 'クリア画像 表示倍率', () => C.clearArt.scale, v => { C.clearArt.scale = v; }, 0.1, 4, 0.01);
     action(clearArt, 'debug-preview-clear', 'クリア画面を表示', () => {
+      g.clearPreview = 'normal'; g.completedRun = false;
       g.stage = C.stages.length - 1; g.hits = C.stages[g.stage].hits;
+      g.state = 'clear'; g.ball = null; g.transition = 0; g.stageShift = null; g.cinematicTail = 0; g.entryOverlap = false; g.input.fill(false); g.effects = []; g.lastHit = -100;
+      g.onEvent('clear'); refresh();
+    });
+    const hardClearArt = section('ハードクリア時のイラスト');
+    number(hardClearArt, 'hard-clear-art-x', 'ハードクリア画像 左上X', () => C.hardClearArt.rect[0], v => { C.hardClearArt.rect[0] = v; });
+    number(hardClearArt, 'hard-clear-art-y', 'ハードクリア画像 左上Y', () => C.hardClearArt.rect[1], v => { C.hardClearArt.rect[1] = v; });
+    number(hardClearArt, 'hard-clear-art-scale', 'ハードクリア画像 表示倍率', () => C.hardClearArt.scale, v => { C.hardClearArt.scale = v; }, 0.1, 4, 0.01);
+    action(hardClearArt, 'debug-preview-hard-clear', 'ハードクリア画面を表示', () => {
+      g.clearPreview = 'hard'; g.completedRun = false;
+      g.stage = C.stages.length - 1; g.hits = g.goal();
       g.state = 'clear'; g.ball = null; g.transition = 0; g.stageShift = null; g.cinematicTail = 0; g.entryOverlap = false; g.input.fill(false); g.effects = []; g.lastHit = -100;
       g.onEvent('clear'); refresh();
     });
@@ -233,7 +296,7 @@
       playState(); g.spawn();
       const [x, y, radius] = C.stages[g.stage].circles.reduce((a, b) => a[1] + a[2] > b[1] + b[2] ? a : b);
       Object.assign(g.ball, { x, y: y + radius + C.ballRadius + 1, vx: 0, vy: 140 });
-      g.hits = C.stages[g.stage].hits - 1; g.lastHit = -100; g.effects = []; g.hit(); ui.syncHud(); refresh();
+      g.hits = g.goal() - 1; g.lastHit = -100; g.effects = []; g.hit(); ui.syncHud(); refresh();
     });
     const portraits = section('カットインのイラスト（次のSTAGE別）');
     const portraitHint = document.createElement('p'); portraitHint.textContent = '盤面上の配置とは独立。X/Yは左上座標、倍率1は横幅490。元画像全体を表示し、帯からはみ出す部分だけ非表示。目のフレームアウトは位置と倍率で調整。プレビューはゲームを進めず表示。Export / Copy / Reset対象です。'; portraits.append(portraitHint);
@@ -274,15 +337,66 @@
     C.walls.forEach((_, i) => ['始点X', '始点Y', '終点X', '終点Y'].forEach((title, j) => number(walls, 'wall-' + i + '-' + j, (i + 1) + ': ' + title, () => C.walls[i][j], v => { const next = [...C.walls[i]]; next[j] = v; if (Math.hypot(next[2] - next[0], next[3] - next[1]) >= 1) C.walls[i][j] = v; }, -3000, 3000)));
     const visible = section('当たり判定表示');
     [['walls', '壁・レール（緑 / 内向き法線）'], ['character', 'キャラクター複合円（水色）'], ['flippers', 'フリッパー（ピンク）'], ['ball', 'ボール（黄）'], ['pivots', 'pivot（白）'], ['trail', '短いボール軌跡']].forEach(([key, title]) => toggle(visible, key, title));
-    const settings = section('設定一覧 / Export', true);
+    const settings = section('設定一覧 / Export・Import', true);
     const output = document.createElement('textarea'); output.id = 'debug-export'; output.readOnly = true; output.setAttribute('aria-label', '設定出力');
     const message = document.createElement('p'); message.id = 'debug-message'; message.textContent = 'Export JSはconfig.js全体の置換用。ファイルへ自動書き込みはしません。';
     function exportConfig(js) { const json = JSON.stringify(C, null, 2); output.value = js ? '(function (P) {\n  P.CONFIG = ' + json + ';\n})(globalThis.Pinball = globalThis.Pinball || {});\n' : json; message.textContent = js ? 'config.js用テキストを出力しました。' : '現在の全設定をJSONで出力しました。'; }
     action(settings, 'debug-reset-config', '初期設定へReset', () => { Object.keys(C).forEach(key => delete C[key]); Object.assign(C, JSON.parse(JSON.stringify(defaults))); applyConfig(); refresh(); exportConfig(false); });
-    action(settings, 'debug-export-json', '一覧 / Export JSON', () => exportConfig(false));
+    action(settings, 'debug-export-json', '設定内容でJSONを更新', () => exportConfig(false));
     action(settings, 'debug-export-js', 'Export config.js', () => exportConfig(true));
     action(settings, 'debug-copy', 'Copy', async () => { if (!output.value) exportConfig(false); try { await navigator.clipboard.writeText(output.value); message.textContent = 'コピーしました。'; } catch { output.focus(); output.select(); message.textContent = '自動コピー不可：選択済みのテキストをCtrl+Cでコピーしてください。'; } });
     settings.append(output, message); exportConfig(false);
+    const importLabel = document.createElement('label'); importLabel.textContent = '保存したJSONを貼り付け';
+    const importText = document.createElement('textarea'); importText.id = 'debug-import'; importText.setAttribute('aria-label', '設定JSONの入力'); importText.placeholder = 'Export JSONでコピーした内容を貼り付けてください';
+    importLabel.append(importText); settings.append(importLabel);
+    const importMessage = document.createElement('p'); importMessage.id = 'debug-import-message'; importMessage.setAttribute('role', 'status');
+    action(settings, 'debug-apply-json', 'JSONを反映', () => {
+      try {
+        const parsed = JSON.parse(importText.value);
+        if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') throw Error('設定全体のJSONオブジェクトを貼り付けてください。');
+        const schema = JSON.parse(JSON.stringify(defaults));
+        schema.stages.forEach(stage => { stage.scale ??= 1; stage.rotation ??= 0; });
+        function validate(value, reference, path) {
+          if (value === undefined) return JSON.parse(JSON.stringify(reference));
+          if (reference === null) { if (value !== null) throw Error(path + ' の形式が違います。'); return null; }
+          if (Array.isArray(reference)) {
+            if (!Array.isArray(value) || (path.endsWith('.circles') ? value.length < 1 || value.length > 64 : value.length !== reference.length)) throw Error(path + ' の配列サイズが違います。');
+            return value.map((item,i) => validate(item, reference[i] ?? reference[0], path + '.' + i));
+          }
+          if (typeof reference === 'object') {
+            if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error(path + ' の形式が違います。');
+            for (const key of Object.keys(value)) if (!Object.hasOwn(reference,key)) throw Error(path + '.' + key + ' は未対応の項目です。');
+            return Object.fromEntries(Object.keys(reference).map(key => [key, validate(value[key], reference[key], path + '.' + key)]));
+          }
+          if (typeof value !== typeof reference || (typeof value === 'number' && (!Number.isFinite(value) || Math.abs(value)>100000))) throw Error(path + ' の値が不正です。');
+          if (/^CONFIG\.(width|height|step|assets|voices)(\.|$)/.test(path) || /sourcePivot|sourceTip|\.image$|VoiceFile$/.test(path)) {
+            if (value !== reference) throw Error(path + ' は変更できません。');
+          }
+          if (typeof value === 'number') {
+            const key = path.split('.').at(-1);
+            const ranges = { gravity:[0,5000], maxSpeed:[1,5000], ballRadius:[1,100], restitution:[0,1.5], flipperSpeed:[0.1,50], flipperTransfer:[0,3], voicePan:[-0.7,0.7], echoDelay:[0.05,0.8], echoFeedback:[0,0.6], musicCutoff:[200,20000], scale:[0.1,4], blur:[0,64], length:[1,500], radius:[1,100], duration:[0.01,30], period:[0.1,30], trailSeconds:[0.05,2] };
+            if (ranges[key] && (value<ranges[key][0] || value>ranges[key][1])) throw Error(path + ' が調整範囲外です。');
+            if (/^(duration|period|heartPeriod|sampleInterval|windowSeconds|stallSeconds|maxUpperSeconds|ballRadius|maxSpeed|length|radius|scale|tempo|flipperSpeed)$/.test(key) && value<=0) throw Error(path + ' は0より大きくしてください。');
+            if (/^(hits|initialBalls|iterations|bands)$/.test(key) && (!Number.isInteger(value)||value<1||value>9999)) throw Error(path + ' は正の整数にしてください。');
+            if (/^(count|hearts|sparkles|rings|heartCount|screenParticles|trailSparkles)$/.test(key) && (!Number.isInteger(value)||value<0||value>128)) throw Error(path + ' の個数は0～128にしてください。');
+            if (/Volume$|^(opacity|strength|pulseDepth|lowerFade|tintOpacity|heartOpacity|voiceNear|echoMix|echoFeedback|trailOpacity|sparkleOpacity)$/.test(key) && (value<0||value>1)) throw Error(path + ' は0～1にしてください。');
+          }
+          return value;
+        }
+        const next = validate(parsed, schema, 'CONFIG');
+        if (!P.Sound.musicChoices.some(choice => choice.id === next.sound.pattern)) throw Error('BGMパターンが未対応です。');
+        if (next.walls.some(w=>Math.hypot(w[2]-w[0],w[3]-w[1])<1) || [...next.stages,next.clearArt,next.hardClearArt].some(s=>s.rect[2]<=0||s.rect[3]<=0||s.rect[2]>4096||s.rect[3]>4096) || next.stages.some(s=>s.circles.some(c=>c[2]<=0||c[2]>500))) throw Error('壁の長さ・画像サイズ・円の半径を確認してください。');
+        Object.keys(C).forEach(key=>delete C[key]); Object.assign(C,next);
+        circleIndex = Math.min(circleIndex, C.stages[g.stage].circles.length-1);
+        g.input.fill(false); g.motionSamples=[]; g.slowTime=g.upperTime=0;
+        renderer.characterLayers.clear(); renderer.hardHitLayers?.clear(); renderer.glitchLayers.clear();
+        app.sound.stopVoice(); app.sound.restartMusic(); applyConfig(); refresh(); exportConfig(false);
+        for (const [id,key] of [['music-volume','musicVolume'],['effects-volume','effectsVolume']]) document.getElementById(id).value=C.sound[key];
+        document.getElementById('sound-muted').checked=C.sound.muted;
+        importMessage.textContent = 'JSONを反映しました。設定はこのページ内で保持されます。';
+      } catch (error) { importMessage.textContent = '反映できませんでした：' + error.message; }
+    });
+    settings.append(importMessage);
     // Hooks exist only after this debug-only module has loaded.
     const originalHit = g.hit.bind(g), originalTick = g.tick.bind(g), originalEvent = g.onEvent;
     g.hit = function () { originalHit(!mode.freeze); if (mode.freeze) { this.transition = 0; this.stageShift = null; this.cinematicTail = 0; } };
@@ -302,6 +416,6 @@
       ctx.restore();
       if (performance.now() - lastStatus > 150) { lastStatus = performance.now(); const b = game.ball; status.textContent = 'STAGE ' + (game.stage + 1) + ' | ' + game.state + (mode.paused ? ' | PAUSED' : '') + '\n速度 ' + (b ? Math.hypot(b.vx, b.vy).toFixed(1) : '—') + ' px/s' + (b ? '\nvx ' + b.vx.toFixed(1) + ' / vy ' + b.vy.toFixed(1) + '\nx ' + b.x.toFixed(1) + ' / y ' + b.y.toFixed(1) : '') + (mode.slow ? '\nスロー20%（表示速度は物理時間基準）' : ''); refreshVoiceStatus(); if (document.activeElement?.closest('#debug-panel') == null) refresh(); }
     };
-    app.debug = { mode }; refresh();
+    app.debug = { mode, panel, refresh }; refresh(); return app.debug;
   };
 })(globalThis.Pinball);

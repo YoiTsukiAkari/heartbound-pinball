@@ -110,6 +110,7 @@
       this.context = null; this.scene = 'ready'; this.paused = false;
       this.step = 0; this.next = 0; this.last = {}; this.nodes = new Set();
       this.musicPreview = false; this.gamePaused = false;
+      this.hard = false;
       this.buffers = new Map(); this.loading = new Map(); this.fileSource = null;
       this.musicError = '';
       this.voiceSource = null; this.voicePreview = false; this.lastVoice = ''; this.voiceRequest = 0; this.voiceGains = new Map(); this.voiceError = '';
@@ -132,25 +133,83 @@
           if (!Audio) return;
           this.context = new Audio();
           this.music = this.context.createGain(); this.effects = this.context.createGain();
-          this.voice = this.context.createGain(); this.voice.connect(this.effects);
-          this.clearVoice = this.context.createGain(); this.clearVoice.connect(this.effects);
+          this.voice = this.context.createGain();
+          this.clearVoice = this.context.createGain();
+          this.hardClearVoice = this.context.createGain();
           this.master = this.context.createGain();
-          this.music.connect(this.master); this.effects.connect(this.master);
+          // Keep a dry bypass for normal play; only hard mode uses the filter.
+          this.musicDry = this.context.createGain(); this.musicFiltered = this.context.createGain();
+          this.musicFilter = this.context.createBiquadFilter();
+          this.musicFilter.type = 'lowpass'; this.musicFilter.frequency.value = 1400; this.musicFilter.Q.value = 0.5;
+          this.music.connect(this.musicDry); this.musicDry.connect(this.master);
+          this.music.connect(this.musicFilter); this.musicFilter.connect(this.musicFiltered); this.musicFiltered.connect(this.master);
+          this.echoInput = this.context.createGain(); this.echoDelay = this.context.createDelay(1);
+          this.echoDelay.delayTime.value = 0.22;
+          this.echoFeedback = this.context.createGain(); this.echoFeedback.gain.value = 0.24;
+          this.echoFilter = this.context.createBiquadFilter(); this.echoFilter.type = 'lowpass'; this.echoFilter.frequency.value = 2800;
+          this.echoWet = this.context.createGain();
+          this.echoInput.connect(this.echoDelay); this.echoDelay.connect(this.echoFilter);
+          this.echoFilter.connect(this.echoFeedback); this.echoFeedback.connect(this.echoDelay);
+          this.echoFilter.connect(this.echoWet); this.echoWet.connect(this.effects);
+          this.hitEffects = this.context.createGain(); this.hitEffects.connect(this.effects);
+          this.voiceInput = this.context.createGain();
+          for (const bus of [this.voice, this.clearVoice]) bus.connect(this.voiceInput);
+          const voiceRoute = this.createVoiceRoute(this.voiceInput, true);
+          this.voiceDry = voiceRoute.dry; this.voiceNear = voiceRoute.near;
+          this.voiceCompressor = voiceRoute.compressor; this.voicePanner = voiceRoute.panner;
+          // Hard-clear voice keeps proximity processing but has no echo send.
+          this.hardClearRoute = this.createVoiceRoute(this.hardClearVoice, false);
+          this.echoSources = [this.voiceDry, this.voiceNear];
+          this.effects.connect(this.master);
+          this.applyAtmosphere(true);
           this.master.connect(this.context.destination); this.next = this.context.currentTime;
         }
         if (!this.paused && !document.hidden) this.context.resume().catch(() => {});
         this.volumes();
-        for (const file of new Set([...P.CONFIG.voices.flat(), this.settings.clearVoiceFile].filter(Boolean))) this.loadVoice(file);
+        for (const file of new Set([...P.CONFIG.voices.flat(), this.settings.clearVoiceFile, this.settings.hardClearVoiceFile].filter(Boolean))) this.loadVoice(file);
       } catch (_) { /* Audio is optional: gameplay remains available. */ }
+    }
+    createVoiceRoute(input, echo) {
+      const dry = this.context.createGain(), near = this.context.createGain();
+      input.connect(dry); dry.connect(this.effects);
+      // A warm, softly compressed close-mic branch; the original WAV stays intact.
+      const highpass = this.context.createBiquadFilter(); highpass.type = 'highpass'; highpass.frequency.value = 90;
+      const warmth = this.context.createBiquadFilter(); warmth.type = 'lowshelf'; warmth.frequency.value = 220; warmth.gain.value = 2;
+      const lowpass = this.context.createBiquadFilter(); lowpass.type = 'lowpass'; lowpass.frequency.value = 6500;
+      const compressor = this.context.createDynamicsCompressor();
+      compressor.threshold.value = -24; compressor.knee.value = 18; compressor.ratio.value = 2.2;
+      compressor.attack.value = 0.008; compressor.release.value = 0.12;
+      const panner = this.context.createStereoPanner();
+      input.connect(highpass); highpass.connect(warmth); warmth.connect(lowpass); lowpass.connect(compressor);
+      compressor.connect(panner); panner.connect(near); near.connect(this.effects);
+      if (echo) { dry.connect(this.echoInput); near.connect(this.echoInput); }
+      return { dry, near, compressor, panner };
     }
     volumes() {
       if (!this.context) return;
       const s = this.settings, t = this.context.currentTime;
       this.music.gain.setTargetAtTime(s.musicVolume, t, 0.03);
       this.effects.gain.setTargetAtTime(s.effectsVolume, t, 0.03);
-      this.voice.gain.value = s.voiceVolume ?? 1;
-      this.clearVoice.gain.value = s.clearVoiceVolume ?? 0.44;
+      this.voice.gain.value = s.voiceVolume ?? 0.45;
+      this.clearVoice.gain.value = s.clearVoiceVolume ?? 0.62;
+      this.hardClearVoice.gain.value = s.hardClearVoiceVolume ?? 0.52;
       this.master.gain.setTargetAtTime(s.muted ? 0 : 1, t, 0.02);
+      this.applyAtmosphere();
+    }
+    setHard(enabled) {
+      if (this.hard === enabled) return;
+      this.hard = enabled; this.applyAtmosphere();
+    }
+    applyAtmosphere(immediate = false) {
+      if (!this.context) return;
+      const t = this.context.currentTime;
+      const s = P.CONFIG.hardEffects;
+      const proximity = this.hard ? s.voiceNear : 0;
+      for (const [param, value] of [[this.musicDry.gain, this.hard ? 0 : 1], [this.musicFiltered.gain, this.hard ? 1 : 0], [this.echoInput.gain, this.hard ? 1 : 0], [this.echoWet.gain, this.hard ? s.echoMix : 0], [this.musicFilter.frequency, s.musicCutoff], [this.echoDelay.delayTime, s.echoDelay], [this.echoFeedback.gain, s.echoFeedback], [this.voiceDry.gain, 1 - proximity], [this.voiceNear.gain, proximity], [this.voicePanner.pan, this.hard ? s.voicePan : 0], [this.hardClearRoute.dry.gain, 1 - proximity], [this.hardClearRoute.near.gain, proximity], [this.hardClearRoute.panner.pan, this.hard ? s.voicePan : 0]]) {
+        param.cancelScheduledValues(t);
+        if (immediate) param.value = value;
+        else param.setTargetAtTime(value, t, 0.05);
+      }
     }
     stopNotes() {
       if (this.fileSource) {
@@ -247,7 +306,8 @@
           }
         }
         const rms = Math.sqrt(sum / Math.max(1, samples));
-        this.voiceGains.set(file, Math.min(4, 0.18 / Math.max(rms, 0.001), 0.9 / Math.max(peak, 0.001)));
+        const targetRms = file.startsWith('assets/audio/voices/mao/') ? 0.1 : 0.18;
+        this.voiceGains.set(file, Math.min(4, targetRms / Math.max(rms, 0.001), 0.9 / Math.max(peak, 0.001)));
         this.buffers.set(file, buffer); return buffer;
       }).catch(error => { this.voiceError = error.message; return null; });
       this.loading.set(file, pending); return pending;
@@ -260,9 +320,9 @@
         this.voiceSource = null;
       }
     }
-    playClearVoice(preview = false) { return this.playVoice(null, preview, true); }
+    playClearVoice(preview = false, hard = false) { return this.playVoice(null, preview, hard ? 'hard' : true); }
     async playVoice(stage, preview = false, clear = false) {
-      const files = clear ? [this.settings.clearVoiceFile].filter(Boolean) : (P.CONFIG.voices[stage] ?? []).filter(file => this.settings.voiceEnabled?.[file] !== false);
+      const files = clear ? [clear === 'hard' ? this.settings.hardClearVoiceFile : this.settings.clearVoiceFile].filter(Boolean) : (P.CONFIG.voices[stage] ?? []).filter(file => this.settings.voiceEnabled?.[file] !== false);
       if (!files.length) { this.stopVoice(); this.lastVoice = ''; return; }
       if (document.hidden || this.musicPreview || this.settings.muted || (!preview && (!this.context || this.paused))) return;
       this.stopVoice();
@@ -276,7 +336,7 @@
       const source = this.context.createBufferSource(), gain = this.context.createGain();
       source.buffer = buffer;
       gain.gain.value = this.voiceGains.get(file);
-      source.connect(gain); gain.connect(clear ? this.clearVoice : this.voice);
+      source.connect(gain); gain.connect(clear === 'hard' ? this.hardClearVoice : clear ? this.clearVoice : this.voice);
       this.voiceSource = source; this.lastVoice = file;
       source.onended = () => {
         source.disconnect(); gain.disconnect();
@@ -317,7 +377,7 @@
       };
       const notes = recipes[kind]; if (!notes) return;
       const spacing = kind === 'clear' ? 0.14 : kind === 'stage' ? 0.085 : 0.065;
-      notes.forEach((n, i) => this.tone(n + (kind === 'hit' ? tier : 0), now + i * spacing, 0.55, 0.12, this.effects));
+      notes.forEach((n, i) => this.tone(n + (kind === 'hit' ? tier : 0), now + i * spacing, 0.55, 0.12, ['hit', 'stage'].includes(kind) ? this.hitEffects : this.effects));
       if (kind === 'clear') [69, 76, 81, 84, 88].forEach(n => this.tone(n, now + 0.95, 2.2, 0.08, this.effects));
     }
   }

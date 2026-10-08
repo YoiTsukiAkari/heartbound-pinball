@@ -6,14 +6,16 @@
   <meta name="theme-color" content="#210c17">
   <title>HEARTBOUND ❤ PINBALL</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="src/styles/game.css?v=pointer-controls-1">
-  <script defer src="src/scripts/config.js?v=clear-voice-44"></script>
+  <link rel="stylesheet" href="src/styles/game.css?v=maintenance-sidebar-1">
+  <script defer src="src/scripts/config.js?v=voices-mao-1"></script>
   <script defer src="src/scripts/physics.js?v=compound-circles-1"></script>
-  <script defer src="src/scripts/game.js?v=freeze-cinematic-1"></script>
-  <script defer src="src/scripts/renderer.js?v=hit-reaction-selection-2"></script>
+  <script defer src="src/scripts/game.js?v=hard-clear-art-1"></script>
+  <script defer src="src/scripts/renderer.js?v=hard-hit-shadow-2"></script>
   <script defer src="src/scripts/clear-scene.js?v=final-celebration-2"></script>
-  <script defer src="src/scripts/sound.js?v=clear-voice-44"></script>
-  <script defer src="src/scripts/main.js?v=pointer-controls-1"></script>
+  <script defer src="src/scripts/sound.js?v=voices-mao-1"></script>
+  <script defer src="src/scripts/m-mode.js?v=maintenance-sidebar-1"></script>
+  <script defer src="src/scripts/bonus.js?v=maintenance-sidebar-1"></script>
+  <script defer src="src/scripts/main.js?v=release-88db7d1eb54f0fd1"></script>
 </head>
 <body>
   <main class="shell">
@@ -22,7 +24,7 @@
       <canvas id="game-canvas" width="1024" height="1536" aria-label="ボールをフリッパーで弾き、キャラクターへのHITを狙います"></canvas>
       <div class="hud" aria-label="ゲーム進行">
         <div class="hud-left"><div class="stat"><span class="label">HIT</span><span><strong id="hit">0</strong><span class="denominator"> / <span id="target">2</span></span></span><span id="progress" class="hearts" aria-hidden="true">♡ ♡</span></div><div class="stat balls"><span class="label">BALL</span><span class="ball-icons" id="ball-icons" role="img" aria-label="残りボール 3個"></span></div></div>
-        <div class="stat stage"><span class="label">STAGE</span><strong id="stage">1</strong><span class="stage-total" aria-hidden="true" style="visibility:hidden">/ 6</span></div>
+        <div class="hud-right"><div class="stat stage"><span class="label">STAGE</span><strong id="stage">1</strong><span class="stage-total" aria-hidden="true" style="visibility:hidden">/ 6</span></div></div>
       </div>
       <p id="announcement" class="announcement" role="status" aria-live="polite"></p>
       <div id="pause-overlay" class="overlay pause-overlay" hidden>
@@ -48,15 +50,15 @@
     <h2 id="credits-title">CREDITS</h2>
     <dl>
       <dt>Created by</dt>
-      <dd><a href="https://x.com/YoiTsukiAkari" target="_blank" rel="noopener noreferrer">宵月灯 <img class="external-link-icon" src="assets/images/ui/external-link.png" alt="外部リンク" width="14" height="14"></a></dd>
+      <dd><a href="https://x.com/YoiTsukiAkari" target="_blank" rel="noopener noreferrer">宵月灯かんぱにー <img class="external-link-icon" src="assets/images/ui/external-link.png" alt="外部リンク" width="14" height="14"></a></dd>
       <dt>Game Design / Consultation</dt>
       <dd>ChatGPT - GPT-5.6 Sol</dd>
       <dt>Programming / Testing</dt>
       <dd>Codex - GPT-6.1 Sol mid</dd>
       <dt>Music</dt>
       <dd><a href="https://www.youtube.com/watch?v=M6NwLpTYLtM" target="_blank" rel="noopener noreferrer">MOONLIT. BGM Factory <img class="external-link-icon" src="assets/images/ui/external-link.png" alt="外部リンク" width="14" height="14"></a></dd>
-      <dt>Voice Material</dt>
-      <dd><a href="https://amitaro.net" target="_blank" rel="noopener noreferrer">あみたろの声素材工房 <img class="external-link-icon" src="assets/images/ui/external-link.png" alt="外部リンク" width="14" height="14"></a></dd>
+      <dt>Voice Synthesis</dt>
+      <dd>AivisSpeech / まお</dd>
     </dl>
     <button id="credits-close" type="button" autofocus>CLOSE</button>
     <p class="hint">C / ESC で閉じる</p>

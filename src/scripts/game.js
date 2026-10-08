@@ -10,11 +10,19 @@
       this.stageShift = null; this.entryOverlap = false; this.cinematicTail = 0;
       this.spawnTimer = 0; this.slowTime = 0; this.upperTime = 0;
       this.motionSamples = []; this.sampleTimer = 0; this.recoveries = 0; this.holdSettling = [null, null];
+      this.modes = { infinite: false, freeze: false, hard: false }; this.completedRun = false;
+    }
+    goal(stage = this.stage) { return C.stages[stage].hits * (this.modes.hard ? 3 : 1); }
+    stopProgression() {
+      this.transition = 0; this.stageShift = null; this.cinematicTail = 0;
+      this.effects.forEach(e => { if (e.kind === 'stage-clear') { e.kind = 'hit'; e.celebration = null; } });
     }
     ready() { this.state = 'ready'; this.onEvent('ready'); }
     start() {
       if (!['ready', 'clear', 'over'].includes(this.state)) return;
       this.stage = 0; this.hits = 0; this.balls = C.initialBalls; this.state = 'playing'; this.paused = false;
+      this.completedRun = false;
+      this.clearPreview = null;
       this.input.fill(false); this.effects = []; this.transition = 0; this.spawnTimer = 0; this.lastHit = -100;
       this.stageShift = null; this.entryOverlap = false; this.cinematicTail = 0;
       this.recoveries = 0;
@@ -93,9 +101,9 @@
       if (this.transition > 0 || this.time - this.lastHit < C.hitCooldown) return;
       this.lastHit = this.time; this.hits++;
       // Snapshot this HIT's stage progress so older bursts retain their tier.
-      const goal = C.stages[this.stage].hits, tiers = C.hitEffects.tiers.length;
+      const goal = this.goal(), tiers = C.hitEffects.tiers.length;
       const progress = goal <= 1 ? 1 : Math.min(1, (this.hits - 1) / (goal - 1));
-      const achieved = allowProgression && this.hits >= goal, intermediate = this.stage < C.stages.length - 1;
+      const achieved = allowProgression && !this.modes.freeze && this.hits >= goal, intermediate = this.stage < C.stages.length - 1;
       // One event snapshot keeps in-flight timing consistent during debug edits.
       const celebration = achieved && intermediate ? JSON.parse(JSON.stringify(C.stageCelebration)) : null;
       const marks = C.hitReaction.enabledMarks.flatMap((enabled, i) => enabled ? [i] : []);
@@ -142,7 +150,7 @@
           if (shift.age < s.slowIn) dt *= s.slowScale;
           else return;
         } else if (this.transition === 0) {
-          this.state = 'clear'; this.ball = null; this.input.fill(false); this.onEvent('clear');
+          this.clearPreview = null; this.completedRun = true; this.state = 'clear'; this.ball = null; this.input.fill(false); this.onEvent('clear');
         }
         if (!this.stageShift) return;
       } else if (this.cinematicTail > 0) {
@@ -187,7 +195,7 @@
       if (character && !this.entryOverlap) { const bounced = F.reflect(b, character, 0.9); if (bounced) this.hit(); }
       // A normal drain always costs a BALL; recovery must never rescue it.
       if (b.y > C.height + b.r || b.x < -100 || b.x > C.width + 100) {
-        this.ball = null; this.balls--; this.onEvent('lost');
+        this.ball = null; this.balls = this.modes.infinite ? Math.max(1, this.balls - 1) : this.balls - 1; this.onEvent('lost');
         if (this.balls <= 0) { this.state = 'over'; this.input.fill(false); this.transition = 0; this.onEvent('over'); }
         else this.spawnTimer = C.respawnDelay;
         return;

@@ -3,7 +3,18 @@
   // All play-feel values are provisional; tune here after playtesting.
   P.CONFIG = {
     width: 1024, height: 1536, step: 1 / 240,
-    sound: { musicVolume: 0.25, effectsVolume: 0.5, voiceVolume: 0.2, clearVoiceVolume: 0.44, clearVoiceFile: "assets/audio/voices/yattajan_01.wav", voiceEnabled: { "assets/audio/voices/a_02.wav": true, "assets/audio/voices/hya_01.wav": true, "assets/audio/voices/uu_01.wav": true, "assets/audio/voices/a_06.wav": true }, muted: false, tempo: 88, pattern: 'moonlit' },
+    hardEffects: {
+      tintOpacity: 0.24, tintHue: 271, heartCount: 33, heartSize: 40, heartOpacity: 0.8, heartPeriod: 3.8, heartEdge: 0.7, heartScatterX: 2.5, heartScatterY: 4, heartTilt: 9,
+      musicCutoff: 700, echoMix: 0.26, echoDelay: 0.48, echoFeedback: 0.16, voiceNear: 1, voicePan: 0,
+      glitch: { enabled: false, duration: 0.32, opacity: 0.3, offset: 20, bands: 7, speed: 24 },
+      hit: { duration: 0.85,
+        heartWave: { enabled: false, opacity: 0.6, size: 180 },
+        shadow: { enabled: true, opacity: 0.5, offset: 20, delay: 0.02 },
+        desaturate: { enabled: false, strength: 0.85, duration: 0.38 },
+        afterimage: { enabled: true, opacity: 0.56, spread: 0.39 }
+      }
+    },
+    sound: { musicVolume: 0.25, effectsVolume: 0.5, voiceVolume: 0.45, clearVoiceVolume: 0.62, clearVoiceFile: "assets/audio/voices/mao/mao_clear.wav", hardClearVoiceVolume: 0.52, hardClearVoiceFile: "assets/audio/voices/mao/mao_hard_clear.wav", voiceEnabled: { "assets/audio/voices/mao/mao_hit_a.wav": false, "assets/audio/voices/mao/mao_hit_n.wav": true, "assets/audio/voices/mao/mao_hit_short.wav": true, "assets/audio/voices/mao/mao_hit_surprise.wav": true, "assets/audio/voices/mao/mao_hit_fu.wav": true }, muted: false, tempo: 88, pattern: 'moonlit' },
     ballEffects: { trailSeconds: 0.45, trailOpacity: 0.7, trailSparkles: 48, trailSize: 2.8, trailInterval: 0.04, trailSpacing: 10, sparkleOpacity: 1, sparkleSize: 0.9, sparkleSpeed: 8 },
     contactEffects: { duration: 0.48, sparkles: 8, spread: 20, opacity: 0.3 },
     hitReaction: { duration: 0.75, size: 48, enabledMarks: [true, true, true, true, true, true], stageScales: [1, 1.1, 1.2, 1.3, 1.4, 1.7], anchors: [[0.8, 0.2], [0.8, 0.3], [0.8, 0.23], [0.8, 0.33], [0.8, 0.53], [0.71, 0.65]] },
@@ -49,6 +60,7 @@
       { hits: 24, rect: [232, 415, 560, 840], scale: 0.99, circles: [[442, 738, 91], [586, 767, 92], [484, 842, 75], [434, 920, 36], [508, 989, 69], [558, 852, 76], [584, 631, 21], [504, 1196, 36], [694, 1022, 21]] }
     ],
     clearArt: { rect: [-65, 388, 640, 960], scale: 2 },
+    hardClearArt: { rect: [-492, 395, 896, 1344], scale: 2.33 },
     stageCelebration: {
       slowIn: 0.18, slowScale: 0.2, hold: 0.12, fadeOut: 0.22, fadeIn: 0.24, poseHold: 0.4,
       slowOut: 0.18, resumeScale: 0.3,
@@ -83,13 +95,14 @@
       hearts: { count: 3, opacity: 0.9, size: 1.9, period: 4.8, rise: 32 },
       devils: { count: 0, opacity: 0.85, size: 1, period: 9, duration: 3 }
     },
-    voices: Array.from({ length: 6 }, () => ['a_02.wav', 'hya_01.wav', 'uu_01.wav', 'a_06.wav'].map(name => 'assets/audio/voices/' + name)),
+    voices: Array.from({ length: 6 }, () => ['mao_hit_a.wav', 'mao_hit_n.wav', 'mao_hit_short.wav', 'mao_hit_surprise.wav', 'mao_hit_fu.wav'].map(name => 'assets/audio/voices/mao/' + name)),
     assets: {
       board: 'assets/images/board/盤面と背景.png',
       ball: 'assets/images/parts/ボール.png',
       left: 'assets/images/parts/左フリッパー.png',
       right: 'assets/images/parts/右フリッパー.png',
       clear: 'assets/images/characters/results/ステージクリア後.png',
+      hardClear: 'assets/images/characters/results/ハードクリア後.png',
       ...Object.fromEntries(Array.from({ length: 6 }, (_, i) => ['stage' + (i + 1), 'assets/images/characters/stages/ステージ' + (i + 1) + '.png']))
     }
   };
