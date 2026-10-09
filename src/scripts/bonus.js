@@ -67,7 +67,7 @@
       for (const [key, active] of [['i',g.modes.infinite],['f',g.modes.freeze],['s',dialog.open],['h',g.modes.hard]]) {
         buttons[key].classList.toggle('mode-active', active);
         buttons[key].setAttribute('aria-pressed', String(active));
-        buttons[key].disabled = g.modes.hard && !['f', 'h'].includes(key);
+        buttons[key].disabled = g.modes.hard && !hardCleared && !['f', 'h'].includes(key);
       }
     }
     function close() { if (dialog.open) dialog.close(); refresh(); ui.resetClock(); }
@@ -84,7 +84,7 @@
     dialog.addEventListener('cancel', e => { e.preventDefault(); close(); });
     function run(key) {
       if (key === 'm') { if (hardCleared) { close(); mMode.toggle(); } return; }
-      if (!unlocked || (g.modes.hard && !['f', 'h'].includes(key))) return;
+      if (!unlocked || (g.modes.hard && !hardCleared && !['f', 'h'].includes(key))) return;
       if (key === 's') {
         if (dialog.open) close();
         else { ui.releaseInput(); dialog.showModal(); ui.resetClock(); refresh(); }
@@ -110,7 +110,7 @@
         const firstClear = !unlocked, firstHardClear = g.modes.hard && !hardCleared;
         unlocked = true; if (g.modes.hard) hardCleared = true;
         try { localStorage.setItem(storageKey, '1'); if (hardCleared) localStorage.setItem(hardStorageKey, '1'); } catch (_) {}
-        revealIcons([...(firstClear ? Object.values(buttons) : []), ...(firstHardClear ? [futureMode] : [])]);
+        revealIcons([...new Set([...(firstClear ? Object.values(buttons) : []), ...(firstHardClear ? [buttons.i, buttons.s, futureMode] : [])])]);
         refresh();
       },
       key(e) {
